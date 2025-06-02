@@ -66,9 +66,10 @@
     <div id="log"></div>
 
     <script>
-        const wsUrl = 'wss://play.blooket.com/socket'; // Likely WebSocket URL, verify with dev tools
+        const joinUrl = 'https://api.blooket.com/api/firebase/join';
+        const wsUrl = 'wss://play.blooket.com/socket'; // Verify with dev tools
         let bots = [];
-        let answerCache = {}; // Cache for correct answers
+        let answerCache = {};
 
         function logMessage(message) {
             const logDiv = document.getElementById('log');
@@ -79,17 +80,50 @@
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
-        function connectBot(botId, gamePin) {
+        async function joinGame(botId, gamePin) {
+            try {
+                const response = await fetch(joinUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'accept': 'application/json, text/plain, */*',
+                        'accept-language': 'en-US,en;q=0.9',
+                        'content-type': 'application/json;charset=UTF-8',
+                        'sec-ch-ua-mobile': '?0',
+                        'sec-fetch-dest': 'empty',
+                        'sec-fetch-mode': 'cors',
+                        'sec-fetch-site': 'same-site'
+                    },
+                    referrer: 'https://www.blooket.com/',
+                    referrerPolicy: 'strict-origin-when-cross-origin',
+                    body: JSON.stringify({
+                        id: gamePin,
+                        name: `Bot_${botId}`
+                    }),
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    logMessage(`Bot ${botId} joined with session: ${data.sessionId || 'unknown'}`);
+                    return data.sessionId || data.token; // Adjust based on response
+                } else {
+                    throw new Error(data.error || 'Join failed');
+                }
+            } catch (e) {
+                logMessage(`Bot ${botId} fucked up joining: ${e.message}`);
+                return null;
+            }
+        }
+
+        function connectBot(botId, sessionId) {
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
                 logMessage(`Bot ${botId} connected to WebSocket`);
-                // Send join message (format is a guess, verify with dev tools)
                 ws.send(JSON.stringify({
-                    type: 'joinGame',
-                    gameId: gamePin,
-                    name: `Bot_${botId}`,
-                    clientType: 'javascript' // Might be required, check real messages
+                    type: 'auth',
+                    sessionId: sessionId,
+                    clientType: 'javascript' // Might be required
                 }));
             };
 
@@ -98,7 +132,7 @@
                     const message = JSON.parse(data);
                     if (message.type === 'authResponse') {
                         if (message.success) {
-                            logMessage(`Bot ${botId} authenticated, session: ${message.sessionId || 'unknown'}`);
+                            logMessage(`Bot ${botId} authenticated`);
                         } else {
                             logMessage(`Bot ${botId} auth failed: ${message.error || 'Unknown error'}`);
                             ws.close();
@@ -110,13 +144,12 @@
                             type: 'submitAnswer',
                             questionId: message.questionId,
                             answer: answer,
-                            sessionId: message.sessionId // Include if required
+                            sessionId: sessionId
                         }));
                         logMessage(`Bot ${botId} answered: ${answer}`);
                     } else if (message.type === 'questionData') {
-                        // Some games send answers in separate messages
                         if (message.correctAnswers) {
-                            answerCache[message.questionId] = message.correctAnswers[0]; // Store first correct answer
+                            answerCache[message.questionId] = message.correctAnswers[0];
                             logMessage(`Bot ${botId} cached answer for ${message.questionId}: ${message.correctAnswers[0]}`);
                         }
                     } else {
@@ -134,19 +167,15 @@
         }
 
         async function getCorrectAnswer(questionId, message, ws) {
-            // Check cache first
             if (answerCache[questionId]) {
                 return answerCache[questionId];
             }
-            // Placeholder: Blooket might send answers in questionData messages or client-side
-            // Inspect WebSocket messages or scripts in dev tools
             logMessage(`No cached answer for question ${questionId}, guessing`);
-            // Fallback: Random guess from possible answers (replace with real logic)
             const possibleAnswers = message.answers || ['Option1', 'Option2', 'Option3', 'Option4'];
             return possibleAnswers[Math.floor(Math.random() * possibleAnswers.length)];
         }
 
-        function startFlood() {
+        async function startFlood() {
             const gamePin = document.getElementById('gamePin').value;
             const numBots = parseInt(document.getElementById('numBots').value) || 1;
 
@@ -156,13 +185,16 @@
             }
 
             logMessage(`Starting flood with ${numBots} bots for PIN ${gamePin}`);
-            bots.forEach(ws => ws.close()); // Close existing connections
+            bots.forEach(ws => ws.close());
             bots = [];
-            answerCache = {}; // Reset cache
+            answerCache = {};
 
             for (let i = 0; i < numBots; i++) {
-                const ws = connectBot(i, gamePin);
-                bots.push(ws);
+                const sessionId = await joinGame(i, gamePin);
+                if (sessionId) {
+                    const ws = connectBot(i, sessionId);
+                    bots.push(ws);
+                }
             }
         }
     </script>
