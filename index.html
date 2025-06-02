@@ -59,13 +59,17 @@
 <body>
     <h1>Blooket WebSocket Bot Flooder</h1>
     <div id="controls">
+        <input type="text" id="nameOfbot" placeholder="Name of bots">
         <input type="text" id="gamePin" placeholder="Enter Game PIN">
-        <input type="number" id="numBots" placeholder="Number of Bots" min="1" max="50">
+        <input type="number" id="numberOfBots" placeholder="How many Bots" min="1" max="50">
         <button onclick="startFlood()">Start Flood</button>
     </div>
     <div id="log"></div>
 
     <script>
+        // Credit
+        console.log('%c Created by Sean v :D', 'background: #222; color: yellow');
+
         const joinUrl = 'https://api.blooket.com/api/firebase/join';
         const wsUrl = 'wss://play.blooket.com/socket'; // Verify with dev tools
         let bots = [];
@@ -80,7 +84,7 @@
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
-        async function joinGame(botId, gamePin) {
+        async function joinGame(botId, gameId, nameOfbot) {
             try {
                 const response = await fetch(joinUrl, {
                     method: 'PUT',
@@ -96,8 +100,8 @@
                     referrer: 'https://www.blooket.com/',
                     referrerPolicy: 'strict-origin-when-cross-origin',
                     body: JSON.stringify({
-                        id: gamePin,
-                        name: `Bot_${botId}`
+                        id: gameId,
+                        name: `${nameOfbot}${botId}`
                     }),
                     mode: 'cors',
                     credentials: 'omit'
@@ -105,7 +109,7 @@
                 const data = await response.json();
                 if (data.success) {
                     logMessage(`Bot ${botId} joined with session: ${data.sessionId || 'unknown'}`);
-                    return data.sessionId || data.token; // Adjust based on response
+                    return data.sessionId || data.token;
                 } else {
                     throw new Error(data.error || 'Join failed');
                 }
@@ -115,7 +119,7 @@
             }
         }
 
-        function connectBot(botId, sessionId) {
+        function connectBot(botId, sessionId, nameOfbot) {
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -123,7 +127,8 @@
                 ws.send(JSON.stringify({
                     type: 'auth',
                     sessionId: sessionId,
-                    clientType: 'javascript' // Might be required
+                    name: `${nameOfbot}${botId}`,
+                    clientType: 'javascript'
                 }));
             };
 
@@ -176,23 +181,25 @@
         }
 
         async function startFlood() {
-            const gamePin = document.getElementById('gamePin').value;
-            const numBots = parseInt(document.getElementById('numBots').value) || 1;
+            const nameOfbot = document.getElementById('nameOfbot').value;
+            const gameId = document.getElementById('gamePin').value;
+            const numberOfBots = parseInt(document.getElementById('numberOfBots').value) || 1;
 
-            if (!gamePin) {
-                logMessage('Enter a fucking game PIN, dumbass.');
+            if (!gameId || !nameOfbot) {
+                logMessage('Enter a fucking game PIN and bot name, dumbass.');
                 return;
             }
 
-            logMessage(`Starting flood with ${numBots} bots for PIN ${gamePin}`);
+            logMessage(`Starting flood with ${numberOfBots} bots for PIN ${gameId}`);
             bots.forEach(ws => ws.close());
             bots = [];
             answerCache = {};
 
-            for (let i = 0; i < numBots; i++) {
-                const sessionId = await joinGame(i, gamePin);
+            // Mimicking your for loop
+            for (let botsToJoin = 0; botsToJoin < numberOfBots; botsToJoin++) {
+                const sessionId = await joinGame(botsToJoin, gameId, nameOfbot);
                 if (sessionId) {
-                    const ws = connectBot(i, sessionId);
+                    const ws = connectBot(botsToJoin, sessionId, nameOfbot);
                     bots.push(ws);
                 }
             }
