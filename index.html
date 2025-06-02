@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blooket WebSocket Bot Flooder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        #controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        input, button {
+            margin: 10px;
+            padding: 8px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #cc0000;
+        }
+        #log {
+            width: 80%;
+            max-width: 600px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blooket WebSocket Bot Flooder</h1>
+    <div id="controls">
+        <input type="text" id="gamePin" placeholder="Enter Game PIN">
+        <input type="number" id="numBots" placeholder="Number of Bots" min="1" max="50">
+        <button onclick="startFlood()">Start Flood</button>
+    </div>
+    <div id="log"></div>
+
+    <script>
+        const wsUrl = 'wss://play.blooket.com/socket'; // Likely WebSocket URL, verify with dev tools
+        let bots = [];
+        let answerCache = {}; // Cache for correct answers
+
+        function logMessage(message) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function connectBot(botId, gamePin) {
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                logMessage(`Bot ${botId} connected to WebSocket`);
+                // Send join message (format is a guess, verify with dev tools)
+                ws.send(JSON.stringify({
+                    type: 'joinGame',
+                    gameId: gamePin,
+                    name: `Bot_${botId}`,
+                    clientType: 'javascript' // Might be required, check real messages
+                }));
+            };
+
+            ws.onmessage = async (data) => {
+                try {
+                    const message = JSON.parse(data);
+                    if (message.type === 'authResponse') {
+                        if (message.success) {
+                            logMessage(`Bot ${botId} authenticated, session: ${message.sessionId || 'unknown'}`);
+                        } else {
+                            logMessage(`Bot ${botId} auth failed: ${message.error || 'Unknown error'}`);
+                            ws.close();
+                        }
+                    } else if (message.type === 'question') {
+                        logMessage(`Bot ${botId} got question: ${message.question || message.questionId}`);
+                        const answer = await getCorrectAnswer(message.questionId, message, ws);
+                        ws.send(JSON.stringify({
+                            type: 'submitAnswer',
+                            questionId: message.questionId,
+                            answer: answer,
+                            sessionId: message.sessionId // Include if required
+                        }));
+                        logMessage(`Bot ${botId} answered: ${answer}`);
+                    } else if (message.type === 'questionData') {
+                        // Some games send answers in separate messages
+                        if (message.correctAnswers) {
+                            answerCache[message.questionId] = message.correctAnswers[0]; // Store first correct answer
+                            logMessage(`Bot ${botId} cached answer for ${message.questionId}: ${message.correctAnswers[0]}`);
+                        }
+                    } else {
+                        logMessage(`Bot ${botId} got unknown message: ${JSON.stringify(message)}`);
+                    }
+                } catch (e) {
+                    logMessage(`Bot ${botId} error parsing message: ${e.message}`);
+                }
+            };
+
+            ws.onerror = (e) => logMessage(`Bot ${botId} WebSocket error: ${e.message}`);
+            ws.onclose = () => logMessage(`Bot ${botId} WebSocket closed`);
+
+            return ws;
+        }
+
+        async function getCorrectAnswer(questionId, message, ws) {
+            // Check cache first
+            if (answerCache[questionId]) {
+                return answerCache[questionId];
+            }
+            // Placeholder: Blooket might send answers in questionData messages or client-side
+            // Inspect WebSocket messages or scripts in dev tools
+            logMessage(`No cached answer for question ${questionId}, guessing`);
+            // Fallback: Random guess from possible answers (replace with real logic)
+            const possibleAnswers = message.answers || ['Option1', 'Option2', 'Option3', 'Option4'];
+            return possibleAnswers[Math.floor(Math.random() * possibleAnswers.length)];
+        }
+
+        function startFlood() {
+            const gamePin = document.getElementById('gamePin').value;
+            const numBots = parseInt(document.getElementById('numBots').value) || 1;
+
+            if (!gamePin) {
+                logMessage('Enter a fucking game PIN, dumbass.');
+                return;
+            }
+
+            logMessage(`Starting flood with ${numBots} bots for PIN ${gamePin}`);
+            bots.forEach(ws => ws.close()); // Close existing connections
+            bots = [];
+            answerCache = {}; // Reset cache
+
+            for (let i = 0; i < numBots; i++) {
+                const ws = connectBot(i, gamePin);
+                bots.push(ws);
+            }
+        }
+    </script>
+</body>
+</html>
