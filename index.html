@@ -71,9 +71,10 @@
         console.log('%c Created by Sean v :D', 'background: #222; color: yellow');
 
         const joinUrl = 'https://api.blooket.com/api/firebase/join';
-        const wsUrl = 'wss://play.blooket.com/socket'; // Verify with dev tools
+        const wsUrls = ['wss://play.blooket.com/socket', 'wss://game.blooket.com/socket']; // Fallback URLs
         let bots = [];
         let answerCache = {};
+        let currentWsUrlIndex = 0;
 
         function logMessage(message) {
             const logDiv = document.getElementById('log');
@@ -108,22 +109,23 @@
                 });
                 const data = await response.json();
                 if (data.success) {
-                    logMessage(`Bot ${botId} joined with session: ${data.sessionId || 'unknown'}`);
+                    logMessage(`Bot ${botId} joined with session: ${data.sessionId || data.token || 'unknown'}`);
                     return data.sessionId || data.token;
                 } else {
                     throw new Error(data.error || 'Join failed');
                 }
             } catch (e) {
-                logMessage(`Bot ${botId} fucked up joining: ${e.message}`);
+                logMessage(`Bot ${botId} failed to join: ${e.message}`);
                 return null;
             }
         }
 
-        function connectBot(botId, sessionId, nameOfbot) {
+        function connectBot(botId, sessionId, nameOfbot, retryCount = 0) {
+            const wsUrl = wsUrls[currentWsUrlIndex % wsUrls.length];
             const ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                logMessage(`Bot ${botId} connected to WebSocket`);
+                logMessage(`Bot ${botId} connected to WebSocket (${wsUrl})`);
                 ws.send(JSON.stringify({
                     type: 'auth',
                     sessionId: sessionId,
@@ -165,8 +167,18 @@
                 }
             };
 
-            ws.onerror = (e) => logMessage(`Bot ${botId} WebSocket error: ${e.message}`);
-            ws.onclose = () => logMessage(`Bot ${botId} WebSocket closed`);
+            ws.onerror = (e) => {
+                logMessage(`Bot ${botId} WebSocket error: ${e.message || 'Unknown error'} (URL: ${wsUrl})`);
+                if (retryCount < 2) {
+                    logMessage(`Bot ${botId} retrying with next URL...`);
+                    currentWsUrlIndex++;
+                    setTimeout(() => connectBot(botId, sessionId, nameOfbot, retryCount + 1), 1000);
+                } else {
+                    logMessage(`Bot ${botId} max retries reached`);
+                }
+            };
+
+            ws.onclose = () => logMessage(`Bot ${botId} WebSocket closed (URL: ${wsUrl})`);
 
             return ws;
         }
@@ -194,8 +206,8 @@
             bots.forEach(ws => ws.close());
             bots = [];
             answerCache = {};
+            currentWsUrlIndex = 0;
 
-            // Mimicking your for loop
             for (let botsToJoin = 0; botsToJoin < numberOfBots; botsToJoin++) {
                 const sessionId = await joinGame(botsToJoin, gameId, nameOfbot);
                 if (sessionId) {
